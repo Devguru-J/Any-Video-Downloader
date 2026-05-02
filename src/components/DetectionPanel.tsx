@@ -68,14 +68,14 @@ export function DetectionPanel() {
         <button
           className="btn btn-ghost"
           onClick={() => setDetection(null)}
-          title="Dismiss"
+          title="닫기"
         >
           ✕
         </button>
       </div>
 
       <div className="mt-3">
-        <label className="text-xs text-neutral-500">Quality</label>
+        <label className="text-xs text-neutral-500">화질</label>
         <select
           className="input mt-1"
           value={formatId ?? ""}
@@ -90,15 +90,15 @@ export function DetectionPanel() {
       </div>
 
       <div className="mt-3">
-        <label className="text-xs text-neutral-500">Save to</label>
+        <label className="text-xs text-neutral-500">저장 위치</label>
         <div className="flex gap-2 mt-1">
           <input
             className="input flex-1 truncate"
             readOnly
-            value={folder || "Select a folder"}
+            value={folder || "폴더를 선택하세요"}
           />
           <button className="btn btn-ghost" onClick={chooseFolder}>
-            Browse…
+            찾아보기…
           </button>
         </div>
       </div>
@@ -109,7 +109,7 @@ export function DetectionPanel() {
           onClick={startDownload}
           disabled={!formatId || !folder}
         >
-          Download
+          다운로드
         </button>
       </div>
     </div>

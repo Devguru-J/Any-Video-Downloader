@@ -17,7 +17,7 @@ export function UrlBar() {
       setDetection(meta);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      alert(`Couldn't detect a video on this page.\n\n${msg}`);
+      alert(`이 페이지에서 영상을 찾지 못했습니다.\n\n${msg}`);
     } finally {
       setDetecting(false);
     }
@@ -45,7 +45,7 @@ export function UrlBar() {
       <span className="px-2 text-neutral-400">🔗</span>
       <input
         className="input flex-1"
-        placeholder="Paste video page URL"
+        placeholder="동영상 페이지 URL을 붙여넣으세요"
         value={url}
         onChange={(e) => setUrl(e.target.value)}
         onKeyDown={onKeyDown}
@@ -55,16 +55,16 @@ export function UrlBar() {
         className="btn btn-ghost"
         onClick={pasteAndDetect}
         disabled={detecting}
-        title="Paste from clipboard and detect"
+        title="클립보드에서 붙여넣고 바로 감지"
       >
-        Paste
+        붙여넣기
       </button>
       <button
         className="btn btn-primary"
         onClick={detect}
         disabled={detecting || !url.trim()}
       >
-        {detecting ? "Detecting…" : "Detect"}
+        {detecting ? "감지 중…" : "감지"}
       </button>
     </div>
   );

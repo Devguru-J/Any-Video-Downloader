@@ -32,13 +32,13 @@ export function SettingsView() {
       const u = await check();
       if (u) {
         setUpdateState("available");
-        setUpdateMsg(`v${u.version} available`);
+        setUpdateMsg(`v${u.version} 업데이트가 있습니다`);
         setUpdateState("downloading");
         await u.downloadAndInstall();
         await relaunch();
       } else {
         setUpdateState("none");
-        setUpdateMsg("You're on the latest version");
+        setUpdateMsg("최신 버전을 사용 중입니다");
       }
     } catch (e) {
       setUpdateState("error");
@@ -48,23 +48,23 @@ export function SettingsView() {
 
   return (
     <div className="max-w-xl mx-auto p-6 space-y-6">
-      <Section title="Downloads">
-        <Row label="Default folder">
+      <Section title="다운로드">
+        <Row label="기본 폴더">
           <div className="flex gap-2 w-full">
             <input
               className="input flex-1 truncate"
               readOnly
-              value={defaultFolder || "Not set"}
+              value={defaultFolder || "설정되지 않음"}
             />
             <button className="btn btn-ghost" onClick={pickFolder}>
-              Browse…
+              찾아보기…
             </button>
           </div>
         </Row>
       </Section>
 
-      <Section title="Updates">
-        <Row label="Current version">
+      <Section title="업데이트">
+        <Row label="현재 버전">
           <span className="text-sm tabular-nums">v{version}</span>
         </Row>
         <Row label="">
@@ -77,10 +77,10 @@ export function SettingsView() {
               }
             >
               {updateState === "checking"
-                ? "Checking…"
+                ? "확인 중…"
                 : updateState === "downloading"
-                  ? "Downloading…"
-                  : "Check for updates"}
+                  ? "다운로드 중…"
+                  : "업데이트 확인"}
             </button>
             {updateMsg && (
               <span
@@ -97,9 +97,9 @@ export function SettingsView() {
         </Row>
       </Section>
 
-      <Section title="About">
-        <Row label="App">Any Video Downloader</Row>
-        <Row label="Engine">yt-dlp + ffmpeg (bundled)</Row>
+      <Section title="정보">
+        <Row label="앱">Any Video Downloader</Row>
+        <Row label="엔진">yt-dlp + ffmpeg (내장)</Row>
       </Section>
     </div>
   );

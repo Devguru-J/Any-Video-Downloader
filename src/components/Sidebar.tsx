@@ -19,20 +19,20 @@ export function Sidebar() {
           active={view === "active"}
           onClick={() => setView("active")}
           icon="⬇"
-          label="Active"
+          label="진행 중"
           badge={activeCount > 0 ? activeCount : undefined}
         />
         <NavItem
           active={view === "history"}
           onClick={() => setView("history")}
           icon="📁"
-          label="History"
+          label="기록"
         />
         <NavItem
           active={view === "settings"}
           onClick={() => setView("settings")}
           icon="⚙"
-          label="Settings"
+          label="설정"
         />
       </nav>
 

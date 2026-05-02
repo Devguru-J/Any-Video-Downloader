@@ -7,10 +7,14 @@ export default {
       fontFamily: {
         sans: [
           "Inter",
+          "Pretendard",
+          "Apple SD Gothic Neo",
+          "Noto Sans KR",
           "ui-sans-serif",
           "system-ui",
           "-apple-system",
           "Segoe UI",
+          "Malgun Gothic",
           "sans-serif",
         ],
       },

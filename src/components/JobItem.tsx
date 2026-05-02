@@ -51,7 +51,7 @@ function StatusLine({ job }: { job: JobState }) {
   const s = job.status;
   switch (s.kind) {
     case "queued":
-      return <span>Queued</span>;
+      return <span>대기 중</span>;
     case "running":
       return (
         <>
@@ -62,11 +62,11 @@ function StatusLine({ job }: { job: JobState }) {
         </>
       );
     case "done":
-      return <span className="text-green-600 dark:text-green-400">✓ Done</span>;
+      return <span className="text-green-600 dark:text-green-400">✓ 완료</span>;
     case "error":
-      return <span className="text-red-600 dark:text-red-400" title={s.message}>Failed</span>;
+      return <span className="text-red-600 dark:text-red-400" title={s.message}>실패</span>;
     case "cancelled":
-      return <span>Cancelled</span>;
+      return <span>취소됨</span>;
   }
 }
 
@@ -77,7 +77,7 @@ function Actions({ job }: { job: JobState }) {
       <button
         className="btn btn-ghost"
         onClick={() => ipc.cancelDownload(job.id)}
-        title="Cancel"
+        title="취소"
       >
         ✕
       </button>
@@ -88,7 +88,7 @@ function Actions({ job }: { job: JobState }) {
       <button
         className="btn btn-ghost"
         onClick={() => ipc.openInFinder(s.path)}
-        title="Reveal in Finder"
+        title="파일 위치 열기"
       >
         ↗
       </button>

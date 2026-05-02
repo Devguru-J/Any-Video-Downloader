@@ -15,7 +15,7 @@ export function ActiveView() {
       <div className="flex-1 overflow-y-auto py-2">
         {jobs.length === 0 ? (
           <div className="px-6 py-12 text-center text-sm text-neutral-500">
-            No active downloads. Paste a URL above to get started.
+            진행 중인 다운로드가 없습니다. 위에 URL을 붙여넣어 시작하세요.
           </div>
         ) : (
           jobs.map((j) => <JobItem key={j.id} job={j} />)
