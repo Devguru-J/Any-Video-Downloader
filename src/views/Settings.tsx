@@ -5,10 +5,13 @@ import { relaunch } from "@tauri-apps/plugin-process";
 import { getVersion } from "@tauri-apps/api/app";
 import { useEffect } from "react";
 import { useApp } from "../lib/store";
+import type { BrowserCookies } from "../lib/types";
 
 export function SettingsView() {
   const defaultFolder = useApp((s) => s.defaultFolder);
   const setDefaultFolder = useApp((s) => s.setDefaultFolder);
+  const cookiesFromBrowser = useApp((s) => s.cookiesFromBrowser);
+  const setCookiesFromBrowser = useApp((s) => s.setCookiesFromBrowser);
 
   const [version, setVersion] = useState<string>("…");
   const [updateState, setUpdateState] = useState<
@@ -61,6 +64,31 @@ export function SettingsView() {
             </button>
           </div>
         </Row>
+      </Section>
+
+      <Section title="고급">
+        <Row label="브라우저 쿠키 사용">
+          <select
+            className="input"
+            value={cookiesFromBrowser}
+            onChange={(e) =>
+              setCookiesFromBrowser(e.target.value as BrowserCookies)
+            }
+          >
+            <option value="none">사용 안 함</option>
+            <option value="chrome">Chrome</option>
+            <option value="safari">Safari</option>
+            <option value="firefox">Firefox</option>
+            <option value="edge">Edge</option>
+            <option value="brave">Brave</option>
+          </select>
+        </Row>
+        <p className="text-xs text-neutral-500 leading-relaxed">
+          Cloudflare 보호 사이트나 로그인이 필요한 사이트에서 다운로드가 막히면
+          선택한 브라우저로 그 사이트에 한 번 접속해 챌린지를 통과시킨 뒤 여기
+          옵션을 켜세요. 그 브라우저의 쿠키를 빌려 같은 세션으로 접근합니다.
+          (브라우저는 종료된 상태여야 쿠키 DB를 잠그지 않습니다.)
+        </p>
       </Section>
 
       <Section title="업데이트">

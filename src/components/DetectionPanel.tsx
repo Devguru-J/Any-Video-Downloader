@@ -9,6 +9,7 @@ export function DetectionPanel() {
   const detection = useApp((s) => s.detection);
   const setDetection = useApp((s) => s.setDetection);
   const defaultFolder = useApp((s) => s.defaultFolder);
+  const cookiesFromBrowser = useApp((s) => s.cookiesFromBrowser);
 
   const [formatId, setFormatId] = useState<string | null>(null);
   const [folder, setFolder] = useState(defaultFolder);
@@ -35,14 +36,17 @@ export function DetectionPanel() {
 
   async function startDownload() {
     if (!detection || !formatId || !folder) return;
-    await ipc.startDownload({
-      id: crypto.randomUUID(),
-      url: detection.url,
-      title: detection.title,
-      format_id: formatId,
-      output_dir: folder,
-      thumbnail: detection.thumbnail,
-    });
+    await ipc.startDownload(
+      {
+        id: crypto.randomUUID(),
+        url: detection.url,
+        title: detection.title,
+        format_id: formatId,
+        output_dir: folder,
+        thumbnail: detection.thumbnail,
+      },
+      cookiesFromBrowser,
+    );
     setDetection(null);
   }
 

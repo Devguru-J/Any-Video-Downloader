@@ -47,3 +47,15 @@ export interface UpdatePolicy {
   min_required_version: string;
   message: string;
 }
+
+export type BrowserCookies =
+  | "none"
+  | "chrome"
+  | "safari"
+  | "firefox"
+  | "edge"
+  | "brave";
+
+export interface ProbeOptions {
+  cookies_from_browser: BrowserCookies;
+}

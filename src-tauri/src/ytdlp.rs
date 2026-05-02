@@ -39,22 +39,37 @@ pub struct VideoMeta {
 }
 
 /// Run `yt-dlp -J` against a URL and parse the JSON metadata.
-pub async fn probe(app: &AppHandle, url: &str) -> Result<VideoMeta> {
+/// `cookies_from_browser` is one of `none`, `chrome`, `safari`, `firefox`,
+/// `edge`, `brave` — anything other than `none` is forwarded to yt-dlp's
+/// `--cookies-from-browser` flag.
+pub async fn probe(
+    app: &AppHandle,
+    url: &str,
+    cookies_from_browser: &str,
+) -> Result<VideoMeta> {
     let bin = sidecar_path(app, "yt-dlp")?;
 
-    let output = Command::new(&bin)
-        .arg("-J")
+    let mut cmd = Command::new(&bin);
+    cmd.arg("-J")
         .arg("--no-playlist")
         .arg("--no-warnings")
         .arg("--ignore-config")
-        // Impersonate a real browser; yt-dlp picks the best available
-        // impersonation target. Critical for Cloudflare-fronted sites.
+        // Impersonate a real browser TLS+HTTP fingerprint where supported.
+        .arg("--impersonate")
+        .arg("")
+        // Generic-extractor-specific impersonation hint.
         .arg("--extractor-args")
         .arg("generic:impersonate")
         .arg("--user-agent")
         .arg(BROWSER_UA)
         .arg("--add-header")
-        .arg("Accept-Language: en-US,en;q=0.9,ko;q=0.8")
+        .arg("Accept-Language: en-US,en;q=0.9,ko;q=0.8");
+
+    if cookies_from_browser != "none" && !cookies_from_browser.is_empty() {
+        cmd.arg("--cookies-from-browser").arg(cookies_from_browser);
+    }
+
+    let output = cmd
         .arg("--")
         .arg(url)
         .stdout(Stdio::piped())
@@ -65,13 +80,39 @@ pub async fn probe(app: &AppHandle, url: &str) -> Result<VideoMeta> {
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
-        return Err(anyhow!("yt-dlp failed: {}", stderr.trim()));
+        return Err(anyhow!("{}", friendly_error(&stderr)));
     }
 
     let v: Value = serde_json::from_slice(&output.stdout)
         .context("parsing yt-dlp JSON")?;
 
     parse_meta(url, &v)
+}
+
+fn friendly_error(stderr: &str) -> String {
+    let trimmed = stderr.trim();
+    if trimmed.contains("HTTP Error 403")
+        || trimmed.contains("Cloudflare")
+        || trimmed.contains("anti-bot")
+        || trimmed.contains("Just a moment")
+    {
+        return format!(
+            "Cloudflare가 자동 접근을 차단했습니다.\n\
+             1) 브라우저로 사이트에 한 번 접속해 챌린지를 통과시키고\n\
+             2) 설정 → 고급 → ‘브라우저 쿠키 사용’에서 그 브라우저를 선택한 뒤\n\
+             3) 그 브라우저를 종료한 다음 다시 시도해 주세요.\n\n\
+             원본 메시지:\n{trimmed}"
+        );
+    }
+    if trimmed.contains("Unsupported URL") {
+        return format!(
+            "이 페이지에서 영상 정보를 추출할 수 없었습니다. \
+             외부 플레이어 iframe을 직접 붙여넣거나, \
+             ‘브라우저 쿠키 사용’ 옵션을 켜고 다시 시도해 보세요.\n\n\
+             원본 메시지:\n{trimmed}"
+        );
+    }
+    trimmed.to_string()
 }
 
 fn parse_meta(url: &str, v: &Value) -> Result<VideoMeta> {
@@ -160,11 +201,12 @@ pub fn download_argv(
     url: &str,
     format_id: &str,
     output_dir: &Path,
+    cookies_from_browser: &str,
 ) -> Vec<String> {
     let template = output_dir.join("%(title).100B [%(id)s].%(ext)s");
     let progress_template = r#"download:{"id":"%(info.id)s","downloaded":%(progress.downloaded_bytes)s,"total":%(progress.total_bytes,progress.total_bytes_estimate)s,"speed":%(progress.speed)s,"eta":%(progress.eta)s,"status":"%(progress.status)s","filename":"%(progress.filename)s"}"#;
 
-    vec![
+    let mut argv: Vec<String> = vec![
         yt_dlp.display().to_string(),
         "--no-playlist".into(),
         "--no-warnings".into(),
@@ -174,23 +216,32 @@ pub fn download_argv(
         progress_template.into(),
         "--ffmpeg-location".into(),
         ffmpeg.display().to_string(),
-        // Browser impersonation — needed for Cloudflare-protected sites.
+        "--impersonate".into(),
+        "".into(),
         "--extractor-args".into(),
         "generic:impersonate".into(),
         "--user-agent".into(),
         BROWSER_UA.into(),
         "--add-header".into(),
         "Accept-Language: en-US,en;q=0.9,ko;q=0.8".into(),
-        // Retry transient failures aggressively.
         "--retries".into(),
         "10".into(),
         "--fragment-retries".into(),
         "10".into(),
+    ];
+
+    if cookies_from_browser != "none" && !cookies_from_browser.is_empty() {
+        argv.push("--cookies-from-browser".into());
+        argv.push(cookies_from_browser.to_string());
+    }
+
+    argv.extend([
         "-f".into(),
         format_id.to_string(),
         "-o".into(),
         template.display().to_string(),
         "--".into(),
         url.to_string(),
-    ]
+    ]);
+    argv
 }

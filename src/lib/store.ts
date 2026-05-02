@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { JobState, VideoMeta } from "./types";
+import { persist } from "zustand/middleware";
+import type { BrowserCookies, JobState, VideoMeta } from "./types";
 
 type View = "active" | "history" | "settings";
 
@@ -20,36 +21,53 @@ interface AppState {
   defaultFolder: string;
   setDefaultFolder: (p: string) => void;
 
+  cookiesFromBrowser: BrowserCookies;
+  setCookiesFromBrowser: (b: BrowserCookies) => void;
+
   policyBlocked: { reason: string } | null;
   setPolicyBlocked: (b: { reason: string } | null) => void;
 }
 
-export const useApp = create<AppState>((set) => ({
-  view: "active",
-  setView: (view) => set({ view }),
+export const useApp = create<AppState>()(
+  persist(
+    (set) => ({
+      view: "active",
+      setView: (view) => set({ view }),
 
-  jobs: {},
-  upsertJob: (j) =>
-    set((s) => ({ jobs: { ...s.jobs, [j.id]: j } })),
-  removeJob: (id) =>
-    set((s) => {
-      const { [id]: _, ...rest } = s.jobs;
-      return { jobs: rest };
+      jobs: {},
+      upsertJob: (j) =>
+        set((s) => ({ jobs: { ...s.jobs, [j.id]: j } })),
+      removeJob: (id) =>
+        set((s) => {
+          const { [id]: _, ...rest } = s.jobs;
+          return { jobs: rest };
+        }),
+      setJobs: (jobs) =>
+        set({ jobs: Object.fromEntries(jobs.map((j) => [j.id, j])) }),
+
+      detection: null,
+      detecting: false,
+      setDetection: (detection) => set({ detection }),
+      setDetecting: (detecting) => set({ detecting }),
+
+      defaultFolder: "",
+      setDefaultFolder: (defaultFolder) => set({ defaultFolder }),
+
+      cookiesFromBrowser: "none",
+      setCookiesFromBrowser: (cookiesFromBrowser) => set({ cookiesFromBrowser }),
+
+      policyBlocked: null,
+      setPolicyBlocked: (policyBlocked) => set({ policyBlocked }),
     }),
-  setJobs: (jobs) =>
-    set({ jobs: Object.fromEntries(jobs.map((j) => [j.id, j])) }),
-
-  detection: null,
-  detecting: false,
-  setDetection: (detection) => set({ detection }),
-  setDetecting: (detecting) => set({ detecting }),
-
-  defaultFolder: "",
-  setDefaultFolder: (defaultFolder) => set({ defaultFolder }),
-
-  policyBlocked: null,
-  setPolicyBlocked: (policyBlocked) => set({ policyBlocked }),
-}));
+    {
+      name: "any-video:settings",
+      partialize: (s) => ({
+        defaultFolder: s.defaultFolder,
+        cookiesFromBrowser: s.cookiesFromBrowser,
+      }),
+    },
+  ),
+);
 
 export const activeJobs = (jobs: Record<string, JobState>) =>
   Object.values(jobs).filter(

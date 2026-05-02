@@ -12,8 +12,14 @@ use crate::sidecar::sidecar_path;
 use crate::ytdlp::{self, ProgressLine, VideoMeta};
 
 #[tauri::command]
-pub async fn probe_url(app: AppHandle, url: String) -> Result<VideoMeta, String> {
-    ytdlp::probe(&app, &url).await.map_err(|e| e.to_string())
+pub async fn probe_url(
+    app: AppHandle,
+    url: String,
+    cookies_from_browser: String,
+) -> Result<VideoMeta, String> {
+    ytdlp::probe(&app, &url, &cookies_from_browser)
+        .await
+        .map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -53,13 +59,21 @@ pub async fn start_download(
     app: AppHandle,
     reg: State<'_, JobRegistry>,
     job: DownloadJob,
+    cookies_from_browser: String,
 ) -> Result<String, String> {
     let yt = sidecar_path(&app, "yt-dlp").map_err(|e| e.to_string())?;
     let ff = sidecar_path(&app, "ffmpeg").map_err(|e| e.to_string())?;
     let out = PathBuf::from(&job.output_dir);
     std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
 
-    let argv = ytdlp::download_argv(&yt, &ff, &job.url, &job.format_id, &out);
+    let argv = ytdlp::download_argv(
+        &yt,
+        &ff,
+        &job.url,
+        &job.format_id,
+        &out,
+        &cookies_from_browser,
+    );
     tracing::debug!(?argv, "spawning yt-dlp");
 
     let initial = JobState {

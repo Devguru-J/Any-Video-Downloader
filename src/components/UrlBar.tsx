@@ -7,13 +7,14 @@ export function UrlBar() {
   const detecting = useApp((s) => s.detecting);
   const setDetecting = useApp((s) => s.setDetecting);
   const setDetection = useApp((s) => s.setDetection);
+  const cookiesFromBrowser = useApp((s) => s.cookiesFromBrowser);
 
   async function detect() {
     if (!url.trim()) return;
     setDetecting(true);
     setDetection(null);
     try {
-      const meta = await ipc.probeUrl(url.trim());
+      const meta = await ipc.probeUrl(url.trim(), cookiesFromBrowser);
       setDetection(meta);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
