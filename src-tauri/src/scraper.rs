@@ -10,7 +10,7 @@ use url::Url;
 /// Communicates back via `document.title` (works cross-origin since the
 /// init-script runs in the page's own context).
 const SCRAPER_JS: &str = r#"
-(function() {
+(function install() {
   if (window.__ANY_VIDEO_SCRAPER__) return;
   window.__ANY_VIDEO_SCRAPER__ = true;
 
@@ -33,37 +33,35 @@ const SCRAPER_JS: &str = r#"
       });
       const json = JSON.stringify(list);
       const b64 = btoa(unescape(encodeURIComponent(json)));
-      // Title channel: Rust polls document.title.
       document.title = 'ANYVIDEO::' + b64;
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
   }
 
-  function scanDom() {
-    document.querySelectorAll('iframe').forEach(f => {
-      const src = f.src || f.getAttribute('data-src') || f.getAttribute('data-litespeed-src');
-      if (src && /^https?:/i.test(src)) add(src, 'iframe');
-    });
-    document.querySelectorAll('video').forEach(v => {
-      if (v.src) add(v.src, 'media');
-      v.querySelectorAll('source').forEach(s => {
-        if (s.src) add(s.src, 'media');
-      });
-    });
-    // Sniff inline scripts and HTML for direct manifest URLs.
+  function scan() {
     try {
-      const html = document.documentElement.outerHTML;
+      document.querySelectorAll('iframe').forEach(f => {
+        const src = f.src || f.getAttribute('data-src') || f.getAttribute('data-litespeed-src');
+        if (src && /^https?:/i.test(src)) add(src, 'iframe');
+      });
+      document.querySelectorAll('video').forEach(v => {
+        if (v.src) add(v.src, 'media');
+        v.querySelectorAll('source').forEach(s => {
+          if (s.src) add(s.src, 'media');
+        });
+      });
+      const html = document.documentElement && document.documentElement.outerHTML || '';
       let m;
       RE.lastIndex = 0;
       while ((m = RE.exec(html))) add(m[0], 'media');
-    } catch (e) { /* ignore */ }
+    } catch (e) {}
   }
 
-  // Patch fetch + XHR + MediaSource so we catch URLs the page assembles
-  // dynamically (very common with JW Player and similar).
+  window.__anyVideoScan = scan;
+
   try {
     const origFetch = window.fetch;
     if (origFetch) {
-      window.fetch = function(input, init) {
+      window.fetch = function(input) {
         try {
           const u = typeof input === 'string' ? input : (input && input.url) || '';
           if (/\.(m3u8|mpd|mp4|webm|ts)(\?|$)/i.test(u)) add(u, 'media');
@@ -86,17 +84,16 @@ const SCRAPER_JS: &str = r#"
 
   function startObserver() {
     if (!document.body) return;
-    new MutationObserver(scanDom).observe(document.body, {
+    new MutationObserver(scan).observe(document.body, {
       childList: true, subtree: true, attributes: true,
       attributeFilter: ['src', 'data-src']
     });
   }
-
   if (document.body) startObserver();
   else document.addEventListener('DOMContentLoaded', startObserver);
 
-  setInterval(scanDom, 1500);
-  scanDom();
+  setInterval(scan, 1500);
+  scan();
 })();
 "#;
 
@@ -132,34 +129,37 @@ pub async fn scrape(
         &label,
         WebviewUrl::External(parsed),
     )
-    .title("any-video scanner")
-    .visible(false)
+    .title("영상 찾는 중… (이 창에서 챌린지가 보이면 통과시켜 주세요)")
+    .visible(true)
     .inner_size(1100.0, 720.0)
     .initialization_script(SCRAPER_JS)
     .build()?;
 
     let start = tokio::time::Instant::now();
     let mut last: Vec<ScrapedUrl> = Vec::new();
-    let mut shown = false;
     let mut last_progress = start;
+
+    // Build a poll script that re-runs the scanner each tick. If the
+    // initialization script never landed (page CSP, race), we fall back to
+    // re-installing it inline.
+    let poll_js = format!(
+        r#"(function() {{
+          try {{
+            if (typeof window.__anyVideoScan === 'function') {{
+              window.__anyVideoScan();
+              return;
+            }}
+            // Init script didn't land — install a fresh copy now.
+            {SCRAPER_JS}
+          }} catch (e) {{}}
+        }})();"#
+    );
 
     while start.elapsed() < max_wait {
         tokio::time::sleep(Duration::from_millis(700)).await;
+        let _ = window.eval(&poll_js);
 
         let title = window.title().unwrap_or_default();
-
-        // Reveal the window if Cloudflare seems to be holding us up so the
-        // user can solve any interactive challenge themselves.
-        if !shown
-            && (title.contains("Just a moment")
-                || title.contains("Cloudflare")
-                || title.contains("Attention Required"))
-            && start.elapsed() > Duration::from_secs(4)
-        {
-            let _ = window.show();
-            let _ = window.set_focus();
-            shown = true;
-        }
 
         if let Some(b64) = title.strip_prefix("ANYVIDEO::") {
             if let Ok(bytes) = base64::engine::general_purpose::STANDARD.decode(b64) {
@@ -184,9 +184,8 @@ pub async fn scrape(
             }
         }
 
-        // If we've already captured something AND nothing new has appeared
-        // for a couple seconds, stop early.
-        if !last.is_empty() && last_progress.elapsed() > Duration::from_secs(3) {
+        // Stop early once URLs stop appearing for a few seconds.
+        if !last.is_empty() && last_progress.elapsed() > Duration::from_secs(4) {
             break;
         }
     }

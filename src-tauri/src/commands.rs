@@ -48,7 +48,7 @@ async fn auto_probe(
 
     tracing::info!("yt-dlp direct probe failed; spinning up scraper webview");
 
-    let mut candidates = scraper::scrape(app, url, Duration::from_secs(20)).await?;
+    let mut candidates = scraper::scrape(app, url, Duration::from_secs(45)).await?;
     scraper::rank(&mut candidates);
     tracing::info!(count = candidates.len(), "scraper finished");
 
