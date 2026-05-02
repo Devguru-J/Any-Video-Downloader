@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::process::Stdio;
+use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 use tauri_plugin_opener::OpenerExt;
 use tokio::io::{AsyncBufReadExt, BufReader};
@@ -8,6 +9,7 @@ use tokio::sync::oneshot;
 
 use crate::jobs::{now_secs, DownloadJob, JobRegistry, JobState, JobStatus};
 use crate::policy::{fetch_policy, UpdatePolicy};
+use crate::scraper;
 use crate::sidecar::sidecar_path;
 use crate::ytdlp::{self, ProgressLine, VideoMeta};
 
@@ -17,9 +19,109 @@ pub async fn probe_url(
     url: String,
     cookies_from_browser: String,
 ) -> Result<VideoMeta, String> {
-    ytdlp::probe(&app, &url, &cookies_from_browser)
+    auto_probe(&app, &url, &cookies_from_browser)
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Try to extract a video from `url` automatically. Strategy:
+///   1. yt-dlp directly (fast path; covers ~most public sites).
+///   2. If that fails, open a hidden Tauri webview with the page so the real
+///      browser engine handles any Cloudflare JS challenge naturally and JS
+///      can resolve dynamic players. Capture iframe + media URLs.
+///   3. Probe each captured candidate with yt-dlp; the first one that
+///      yields formats wins.
+///   4. As a last resort, synthesise a minimal VideoMeta from a direct
+///      m3u8/mp4 URL so the user can still download it.
+async fn auto_probe(
+    app: &AppHandle,
+    url: &str,
+    cookies_from_browser: &str,
+) -> anyhow::Result<VideoMeta> {
+    let direct = ytdlp::probe(app, url, cookies_from_browser).await;
+    if let Ok(meta) = &direct {
+        if !meta.formats.is_empty() {
+            return direct;
+        }
+    }
+    let direct_err = direct.err();
+
+    tracing::info!("yt-dlp direct probe failed; spinning up scraper webview");
+
+    let mut candidates = scraper::scrape(app, url, Duration::from_secs(20)).await?;
+    scraper::rank(&mut candidates);
+    tracing::info!(count = candidates.len(), "scraper finished");
+
+    if candidates.is_empty() {
+        return Err(direct_err.unwrap_or_else(|| {
+            anyhow::anyhow!("이 페이지에서 영상 후보를 찾지 못했습니다.")
+        }));
+    }
+
+    // Try yt-dlp on each candidate — give the page URL as referer so private
+    // CDNs that require it accept the request.
+    let mut last_err: Option<anyhow::Error> = None;
+    for c in &candidates {
+        match ytdlp::probe_with_referer(app, &c.url, cookies_from_browser, Some(url)).await {
+            Ok(meta) if !meta.formats.is_empty() => {
+                tracing::info!(picked = %c.url, "scraper candidate succeeded");
+                return Ok(meta);
+            }
+            Ok(_) => {}
+            Err(e) => last_err = Some(e),
+        }
+    }
+
+    // Synthesise a VideoMeta from the best direct media URL we saw, so the
+    // user can still kick off a download. yt-dlp can usually fetch a raw
+    // m3u8/mp4 URL even if it can't classify the surrounding page.
+    if let Some(c) = candidates
+        .iter()
+        .find(|c| c.kind == "media")
+        .or_else(|| candidates.first())
+    {
+        return Ok(VideoMeta {
+            url: c.url.clone(),
+            title: extract_title_from_url(url),
+            thumbnail: None,
+            duration: None,
+            uploader: None,
+            formats: vec![ytdlp::VideoFormat {
+                id: "best".into(),
+                ext: ext_from_url(&c.url).unwrap_or_else(|| "mp4".into()),
+                resolution: None,
+                fps: None,
+                vcodec: None,
+                acodec: None,
+                filesize: None,
+                tbr: None,
+                note: Some("스캐너가 찾은 직접 링크".into()),
+            }],
+            is_playlist: false,
+            playlist_count: None,
+        });
+    }
+
+    Err(last_err.unwrap_or_else(|| {
+        anyhow::anyhow!("이 페이지에서 다운로드 가능한 영상을 찾지 못했습니다.")
+    }))
+}
+
+fn extract_title_from_url(u: &str) -> String {
+    url::Url::parse(u)
+        .ok()
+        .and_then(|p| p.host_str().map(|h| h.to_string()))
+        .unwrap_or_else(|| "video".into())
+}
+
+fn ext_from_url(u: &str) -> Option<String> {
+    let lower = u.to_lowercase();
+    for cand in ["m3u8", "mpd", "mp4", "webm", "ts"] {
+        if lower.contains(&format!(".{cand}")) {
+            return Some(if cand == "m3u8" { "mp4".into() } else { cand.into() });
+        }
+    }
+    None
 }
 
 #[tauri::command]
@@ -73,6 +175,7 @@ pub async fn start_download(
         &job.format_id,
         &out,
         &cookies_from_browser,
+        job.referer.as_deref(),
     );
     tracing::debug!(?argv, "spawning yt-dlp");
 

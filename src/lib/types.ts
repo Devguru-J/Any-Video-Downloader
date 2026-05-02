@@ -19,6 +19,8 @@ export interface VideoMeta {
   formats: VideoFormat[];
   is_playlist?: boolean;
   playlist_count?: number;
+  /// Original page URL the user pasted (for use as Referer on the download).
+  source_url?: string;
 }
 
 export interface DownloadJob {
@@ -28,6 +30,7 @@ export interface DownloadJob {
   format_id: string;
   output_dir: string;
   thumbnail?: string;
+  referer?: string;
 }
 
 export type JobStatus =

@@ -44,6 +44,7 @@ export function DetectionPanel() {
         format_id: formatId,
         output_dir: folder,
         thumbnail: detection.thumbnail,
+        referer: detection.source_url,
       },
       cookiesFromBrowser,
     );

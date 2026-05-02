@@ -14,8 +14,9 @@ export function UrlBar() {
     setDetecting(true);
     setDetection(null);
     try {
-      const meta = await ipc.probeUrl(url.trim(), cookiesFromBrowser);
-      setDetection(meta);
+      const trimmed = url.trim();
+      const meta = await ipc.probeUrl(trimmed, cookiesFromBrowser);
+      setDetection({ ...meta, source_url: trimmed });
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
       alert(`이 페이지에서 영상을 찾지 못했습니다.\n\n${msg}`);

@@ -1,6 +1,7 @@
 mod commands;
 mod jobs;
 mod policy;
+mod scraper;
 mod sidecar;
 mod ytdlp;
 

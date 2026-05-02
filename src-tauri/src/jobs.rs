@@ -11,6 +11,10 @@ pub struct DownloadJob {
     pub format_id: String,
     pub output_dir: String,
     pub thumbnail: Option<String>,
+    /// Optional Referer header — needed when the URL is a manifest captured
+    /// from an embedded player whose CDN gates by referer.
+    #[serde(default)]
+    pub referer: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]

@@ -47,6 +47,17 @@ pub async fn probe(
     url: &str,
     cookies_from_browser: &str,
 ) -> Result<VideoMeta> {
+    probe_with_referer(app, url, cookies_from_browser, None).await
+}
+
+/// Same as [`probe`], but adds a `Referer:` header — many private CDNs
+/// reject manifest requests that don't carry the original page URL.
+pub async fn probe_with_referer(
+    app: &AppHandle,
+    url: &str,
+    cookies_from_browser: &str,
+    referer: Option<&str>,
+) -> Result<VideoMeta> {
     let bin = sidecar_path(app, "yt-dlp")?;
 
     let mut cmd = Command::new(&bin);
@@ -54,16 +65,18 @@ pub async fn probe(
         .arg("--no-playlist")
         .arg("--no-warnings")
         .arg("--ignore-config")
-        // Impersonate a real browser TLS+HTTP fingerprint where supported.
         .arg("--impersonate")
         .arg("")
-        // Generic-extractor-specific impersonation hint.
         .arg("--extractor-args")
         .arg("generic:impersonate")
         .arg("--user-agent")
         .arg(BROWSER_UA)
         .arg("--add-header")
         .arg("Accept-Language: en-US,en;q=0.9,ko;q=0.8");
+
+    if let Some(r) = referer {
+        cmd.arg("--referer").arg(r);
+    }
 
     if cookies_from_browser != "none" && !cookies_from_browser.is_empty() {
         cmd.arg("--cookies-from-browser").arg(cookies_from_browser);
@@ -202,6 +215,7 @@ pub fn download_argv(
     format_id: &str,
     output_dir: &Path,
     cookies_from_browser: &str,
+    referer: Option<&str>,
 ) -> Vec<String> {
     let template = output_dir.join("%(title).100B [%(id)s].%(ext)s");
     let progress_template = r#"download:{"id":"%(info.id)s","downloaded":%(progress.downloaded_bytes)s,"total":%(progress.total_bytes,progress.total_bytes_estimate)s,"speed":%(progress.speed)s,"eta":%(progress.eta)s,"status":"%(progress.status)s","filename":"%(progress.filename)s"}"#;
@@ -229,6 +243,11 @@ pub fn download_argv(
         "--fragment-retries".into(),
         "10".into(),
     ];
+
+    if let Some(r) = referer {
+        argv.push("--referer".into());
+        argv.push(r.to_string());
+    }
 
     if cookies_from_browser != "none" && !cookies_from_browser.is_empty() {
         argv.push("--cookies-from-browser".into());
