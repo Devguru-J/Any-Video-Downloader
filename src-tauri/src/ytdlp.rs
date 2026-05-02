@@ -8,6 +8,11 @@ use tokio::process::Command;
 
 use crate::sidecar::sidecar_path;
 
+/// Modern Chrome UA — many sites refuse the default yt-dlp UA outright.
+const BROWSER_UA: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 \
+     (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36";
+
 #[derive(Debug, Serialize, Clone)]
 pub struct VideoFormat {
     pub id: String,
@@ -41,8 +46,15 @@ pub async fn probe(app: &AppHandle, url: &str) -> Result<VideoMeta> {
         .arg("-J")
         .arg("--no-playlist")
         .arg("--no-warnings")
-        .arg("--no-call-home")
         .arg("--ignore-config")
+        // Impersonate a real browser; yt-dlp picks the best available
+        // impersonation target. Critical for Cloudflare-fronted sites.
+        .arg("--extractor-args")
+        .arg("generic:impersonate")
+        .arg("--user-agent")
+        .arg(BROWSER_UA)
+        .arg("--add-header")
+        .arg("Accept-Language: en-US,en;q=0.9,ko;q=0.8")
         .arg("--")
         .arg(url)
         .stdout(Stdio::piped())
@@ -156,13 +168,24 @@ pub fn download_argv(
         yt_dlp.display().to_string(),
         "--no-playlist".into(),
         "--no-warnings".into(),
-        "--no-call-home".into(),
         "--ignore-config".into(),
         "--newline".into(),
         "--progress-template".into(),
         progress_template.into(),
         "--ffmpeg-location".into(),
         ffmpeg.display().to_string(),
+        // Browser impersonation — needed for Cloudflare-protected sites.
+        "--extractor-args".into(),
+        "generic:impersonate".into(),
+        "--user-agent".into(),
+        BROWSER_UA.into(),
+        "--add-header".into(),
+        "Accept-Language: en-US,en;q=0.9,ko;q=0.8".into(),
+        // Retry transient failures aggressively.
+        "--retries".into(),
+        "10".into(),
+        "--fragment-retries".into(),
+        "10".into(),
         "-f".into(),
         format_id.to_string(),
         "-o".into(),
