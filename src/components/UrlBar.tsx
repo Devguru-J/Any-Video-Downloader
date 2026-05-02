@@ -4,7 +4,9 @@ import { useApp } from "../lib/store";
 
 export function UrlBar() {
   const [url, setUrl] = useState("");
-  const { detecting, setDetecting, setDetection } = useApp();
+  const detecting = useApp((s) => s.detecting);
+  const setDetecting = useApp((s) => s.setDetecting);
+  const setDetection = useApp((s) => s.setDetection);
 
   async function detect() {
     if (!url.trim()) return;

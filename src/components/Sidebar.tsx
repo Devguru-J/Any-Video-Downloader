@@ -1,10 +1,12 @@
+import { useMemo } from "react";
 import clsx from "clsx";
 import { activeJobs, useApp } from "../lib/store";
 
 export function Sidebar() {
   const view = useApp((s) => s.view);
   const setView = useApp((s) => s.setView);
-  const activeCount = useApp((s) => activeJobs(s.jobs).length);
+  const jobsMap = useApp((s) => s.jobs);
+  const activeCount = useMemo(() => activeJobs(jobsMap).length, [jobsMap]);
 
   return (
     <aside className="w-56 shrink-0 border-r border-neutral-200 bg-neutral-50/60 p-3 backdrop-blur dark:border-neutral-800 dark:bg-neutral-950/60">

@@ -1,10 +1,12 @@
+import { useMemo } from "react";
 import { UrlBar } from "../components/UrlBar";
 import { DetectionPanel } from "../components/DetectionPanel";
 import { JobItem } from "../components/JobItem";
 import { activeJobs, useApp } from "../lib/store";
 
 export function ActiveView() {
-  const jobs = useApp((s) => activeJobs(s.jobs));
+  const jobsMap = useApp((s) => s.jobs);
+  const jobs = useMemo(() => activeJobs(jobsMap), [jobsMap]);
 
   return (
     <div className="flex flex-col h-full">

@@ -1,10 +1,16 @@
+import { useMemo } from "react";
 import { JobItem } from "../components/JobItem";
 import { historyJobs, useApp } from "../lib/store";
 import { ipc } from "../lib/ipc";
 
 export function HistoryView() {
-  const jobs = useApp((s) =>
-    historyJobs(s.jobs).sort((a, b) => (b.ended_at ?? 0) - (a.ended_at ?? 0)),
+  const jobsMap = useApp((s) => s.jobs);
+  const jobs = useMemo(
+    () =>
+      historyJobs(jobsMap).sort(
+        (a, b) => (b.ended_at ?? 0) - (a.ended_at ?? 0),
+      ),
+    [jobsMap],
   );
   const setJobs = useApp((s) => s.setJobs);
 
