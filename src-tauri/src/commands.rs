@@ -1,0 +1,251 @@
+use std::path::PathBuf;
+use std::process::Stdio;
+use tauri::{AppHandle, Emitter, State};
+use tauri_plugin_opener::OpenerExt;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tokio::process::Command;
+use tokio::sync::oneshot;
+
+use crate::jobs::{now_secs, DownloadJob, JobRegistry, JobState, JobStatus};
+use crate::policy::{fetch_policy, UpdatePolicy};
+use crate::sidecar::sidecar_path;
+use crate::ytdlp::{self, ProgressLine, VideoMeta};
+
+#[tauri::command]
+pub async fn probe_url(app: AppHandle, url: String) -> Result<VideoMeta, String> {
+    ytdlp::probe(&app, &url).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn list_jobs(reg: State<'_, JobRegistry>) -> Result<Vec<JobState>, String> {
+    Ok(reg.list())
+}
+
+#[tauri::command]
+pub async fn clear_history(reg: State<'_, JobRegistry>) -> Result<(), String> {
+    reg.clear_finished();
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn cancel_download(
+    reg: State<'_, JobRegistry>,
+    job_id: String,
+) -> Result<(), String> {
+    reg.cancel(&job_id);
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn open_in_finder(app: AppHandle, path: String) -> Result<(), String> {
+    app.opener()
+        .reveal_item_in_dir(&path)
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn check_policy(app: AppHandle) -> Result<UpdatePolicy, String> {
+    fetch_policy(&app).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub async fn start_download(
+    app: AppHandle,
+    reg: State<'_, JobRegistry>,
+    job: DownloadJob,
+) -> Result<String, String> {
+    let yt = sidecar_path(&app, "yt-dlp").map_err(|e| e.to_string())?;
+    let ff = sidecar_path(&app, "ffmpeg").map_err(|e| e.to_string())?;
+    let out = PathBuf::from(&job.output_dir);
+    std::fs::create_dir_all(&out).map_err(|e| e.to_string())?;
+
+    let argv = ytdlp::download_argv(&yt, &ff, &job.url, &job.format_id, &out);
+    tracing::debug!(?argv, "spawning yt-dlp");
+
+    let initial = JobState {
+        job: job.clone(),
+        status: JobStatus::Queued,
+        started_at: now_secs(),
+        ended_at: None,
+    };
+    reg.upsert(initial.clone());
+    let _ = app.emit("download://progress", &initial);
+
+    let (cancel_tx, cancel_rx) = oneshot::channel();
+    reg.register_cancel(&job.id, cancel_tx);
+
+    let app_for_task = app.clone();
+    let reg_for_task: JobRegistry = (*reg).clone();
+    let job_id_return = job.id.clone();
+    let job_id_for_task = job.id.clone();
+
+    tauri::async_runtime::spawn(async move {
+        let started = now_secs();
+        let result = run_job(
+            app_for_task.clone(),
+            reg_for_task.clone(),
+            job.clone(),
+            argv,
+            cancel_rx,
+            started,
+        )
+        .await;
+
+        reg_for_task.drop_cancel(&job_id_for_task);
+
+        if let Err(e) = result {
+            let state = JobState {
+                job,
+                status: JobStatus::Error {
+                    message: e.to_string(),
+                },
+                started_at: started,
+                ended_at: Some(now_secs()),
+            };
+            reg_for_task.upsert(state.clone());
+            let _ = app_for_task.emit("download://progress", &state);
+        }
+    });
+
+    Ok(job_id_return)
+}
+
+async fn run_job(
+    app: AppHandle,
+    reg: JobRegistry,
+    job: DownloadJob,
+    argv: Vec<String>,
+    mut cancel_rx: oneshot::Receiver<()>,
+    started: u64,
+) -> anyhow::Result<()> {
+    let mut cmd = Command::new(&argv[0]);
+    cmd.args(&argv[1..]);
+    cmd.stdout(Stdio::piped());
+    cmd.stderr(Stdio::piped());
+
+    #[cfg(unix)]
+    {
+        // Put yt-dlp in its own session so child.kill() takes the whole tree.
+        // tokio::process::Command exposes pre_exec as an inherent method on Unix.
+        unsafe {
+            cmd.pre_exec(|| {
+                if libc::setsid() < 0 {
+                    return Err(std::io::Error::last_os_error());
+                }
+                Ok(())
+            });
+        }
+    }
+    #[cfg(windows)]
+    {
+        // Hide the console window for the spawned process. CREATE_NO_WINDOW.
+        cmd.creation_flags(0x0800_0000);
+    }
+
+    let mut child = cmd.spawn()?;
+    let stdout = child.stdout.take().expect("piped");
+    let stderr = child.stderr.take().expect("piped");
+
+    let mut out_reader = BufReader::new(stdout).lines();
+    let mut err_reader = BufReader::new(stderr).lines();
+
+    let mut last_filename: Option<String> = None;
+    let mut last_stderr_line: Option<String> = None;
+
+    loop {
+        tokio::select! {
+            _ = &mut cancel_rx => {
+                let _ = child.kill().await;
+                let state = JobState {
+                    job: job.clone(),
+                    status: JobStatus::Cancelled,
+                    started_at: started,
+                    ended_at: Some(now_secs()),
+                };
+                reg.upsert(state.clone());
+                let _ = app.emit("download://progress", &state);
+                return Ok(());
+            }
+            line = out_reader.next_line() => {
+                match line? {
+                    Some(l) => handle_stdout(&app, &reg, &job, &l, started, &mut last_filename),
+                    None => break,
+                }
+            }
+            line = err_reader.next_line() => {
+                if let Ok(Some(l)) = line {
+                    if !l.trim().is_empty() {
+                        last_stderr_line = Some(l);
+                    }
+                }
+            }
+        }
+    }
+
+    let status = child.wait().await?;
+    if !status.success() {
+        let msg = last_stderr_line
+            .unwrap_or_else(|| format!("yt-dlp exited with status {status}"));
+        let state = JobState {
+            job: job.clone(),
+            status: JobStatus::Error { message: msg },
+            started_at: started,
+            ended_at: Some(now_secs()),
+        };
+        reg.upsert(state.clone());
+        let _ = app.emit("download://progress", &state);
+        return Ok(());
+    }
+
+    let path = last_filename.unwrap_or_else(|| job.output_dir.clone());
+    let state = JobState {
+        job: job.clone(),
+        status: JobStatus::Done { path },
+        started_at: started,
+        ended_at: Some(now_secs()),
+    };
+    reg.upsert(state.clone());
+    let _ = app.emit("download://progress", &state);
+    Ok(())
+}
+
+fn handle_stdout(
+    app: &AppHandle,
+    reg: &JobRegistry,
+    job: &DownloadJob,
+    line: &str,
+    started: u64,
+    last_filename: &mut Option<String>,
+) {
+    if let Some(rest) = line.strip_prefix("download:") {
+        if let Ok(p) = serde_json::from_str::<ProgressLine>(rest) {
+            if let Some(name) = &p.filename {
+                if !name.is_empty() && name != "NA" {
+                    *last_filename = Some(name.clone());
+                }
+            }
+            let state = JobState {
+                job: job.clone(),
+                status: JobStatus::Running {
+                    downloaded: p.downloaded.unwrap_or(0),
+                    total: p.total.unwrap_or(0),
+                    speed: p.speed.unwrap_or(0.0),
+                    eta: p.eta.unwrap_or(0.0),
+                },
+                started_at: started,
+                ended_at: None,
+            };
+            reg.upsert(state.clone());
+            let _ = app.emit("download://progress", &state);
+            return;
+        }
+    }
+
+    if let Some(rest) = line.strip_prefix("[Merger] Merging formats into \"") {
+        if let Some(end) = rest.rfind('"') {
+            *last_filename = Some(rest[..end].to_string());
+        }
+    } else if let Some(rest) = line.strip_prefix("[download] Destination: ") {
+        *last_filename = Some(rest.to_string());
+    }
+}
