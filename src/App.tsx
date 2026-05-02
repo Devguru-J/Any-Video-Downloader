@@ -10,37 +10,40 @@ import { ipc, onJobUpdate } from "./lib/ipc";
 export default function App() {
   const view = useApp((s) => s.view);
   const policyBlocked = useApp((s) => s.policyBlocked);
-  const upsertJob = useApp((s) => s.upsertJob);
-  const setJobs = useApp((s) => s.setJobs);
-  const setPolicyBlocked = useApp((s) => s.setPolicyBlocked);
 
   useEffect(() => {
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
 
     (async () => {
       try {
         const jobs = await ipc.listJobs();
-        setJobs(jobs);
+        if (!cancelled) useApp.getState().setJobs(jobs);
       } catch {
-        /* first-run: backend may have nothing yet */
+        /* first-run */
       }
 
-      unlisten = await onJobUpdate((j) => upsertJob(j));
+      unlisten = await onJobUpdate((j) => useApp.getState().upsertJob(j));
 
       try {
         const policy = await ipc.checkPolicy();
         const current = (window as unknown as { __APP_VERSION__?: string })
           .__APP_VERSION__ ?? "0.0.0";
-        if (compare(current, policy.min_required_version) < 0) {
-          setPolicyBlocked({ reason: policy.message });
+        if (!cancelled && compare(current, policy.min_required_version) < 0) {
+          useApp.getState().setPolicyBlocked({ reason: policy.message });
         }
       } catch {
-        /* offline → trust local cache (handled in backend) */
+        /* offline */
       }
     })();
 
-    return () => unlisten?.();
-  }, [setJobs, upsertJob, setPolicyBlocked]);
+    return () => {
+      cancelled = true;
+      unlisten?.();
+    };
+    // Run exactly once on mount; store actions are accessed via getState().
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   if (policyBlocked) return <PolicyBlocker reason={policyBlocked.reason} />;
 
